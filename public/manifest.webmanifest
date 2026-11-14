@@ -1,0 +1,9 @@
+{
+  "name": "MM Objave",
+  "short_name": "MM Objave",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#F8FBF0",
+  "theme_color": "#2C5419",
+  "icons": []
+}

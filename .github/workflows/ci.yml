@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Migracije odgovaraju schema.prisma
+        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url postgresql://postgres:postgres@localhost:5432/postgres --exit-code
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npx next build
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/db
+          AUTH_SECRET: ci-only-secret-not-used-in-production
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
