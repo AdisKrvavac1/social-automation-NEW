@@ -28,6 +28,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     { href: '/dashboard/kalendar', label: 'Kalendar', show: true },
     { href: '/dashboard/analitika', label: 'Izvještaj', show: isOwner },
     { href: '/dashboard/nalozi', label: 'Nalozi', show: isOwner },
+    { href: '/dashboard/korisnici', label: 'Korisnici', show: isOwner },
   ].filter((l) => l.show);
 
   return (

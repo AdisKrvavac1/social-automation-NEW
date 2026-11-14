@@ -41,7 +41,7 @@ npm run worker                # u drugom terminalu
    - `REDIS_URL=${{Redis.REDIS_URL}}`
    - `NEXT_PUBLIC_APP_URL` = javni URL servisa (Settings → Networking → Generate Domain ili vlastita domena)
 5. **Worker:** New → GitHub repo (isti repo) → u Settings servisa postavi **Config-as-code path** na `railway.worker.json`. Varijable: kopiraj iste kao za web (ili koristi Shared Variables).
-6. **Seed (jednom):** u web servisu otvori shell ili lokalno s Railway bazom pokreni `npm run seed` sa `SEED_*` varijablama. Nakon toga obriši `SEED_*` lozinke iz varijabli.
+6. **Prvi admin:** u web servisu postavi `SEED_ADMIN_EMAIL` i `SEED_ADMIN_PASSWORD` (najmanje 12 znakova). Pri pokretanju se automatski kreira restoran MM i admin (`npm run seed:auto`). Kad se prijaviš, obriši `SEED_ADMIN_PASSWORD` iz varijabli, inače se lozinka vraća na tu vrijednost na svakom deployu.
 7. **Provjera:** `https://<domena>/api/health` vraća `"status":"ok"` kad rade baza, Redis i worker.
 
 Migracije baze se pokreću same pri startu web servisa (`prisma migrate deploy`).
@@ -75,5 +75,6 @@ Verzija Graph API-ja je u `META_GRAPH_VERSION`; provjeri aktuelnu na developers.
 ## Poznata ograničenja (sljedeći koraci)
 
 - Grafički MM šabloni (renderovanje fotografije u okvir s tekstom) još nisu dio aplikacije; objavljuje se originalna fotografija.
-- Upravljanje korisnicima ide preko `npm run seed`; ekran za dodavanje osoblja dolazi u sljedećoj verziji.
+- Korisnici: vlasnik ili admin dodaje ljude u **Korisnici**; oni dobiju email s jednokratnim linkom (7 dana) i sami postave lozinku. Bez Resenda aplikacija prikaže link za ručno slanje. Zaboravljena lozinka šalje link koji važi 1 sat.
+- Javne registracije nema; uloga i pripadnost restoranu čitaju se iz baze na svakom zahtjevu, pa uklanjanje korisnika djeluje odmah.
 - TikTok je isključen (`ENABLE_TIKTOK=false`) jer traži odobrenje TikTok aplikacije.

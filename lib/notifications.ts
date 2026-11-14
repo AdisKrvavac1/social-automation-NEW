@@ -82,3 +82,58 @@ export async function sendPostFailedAlert(params: {
     console.error('[Email] Slanje upozorenja nije uspjelo:', e.message);
   }
 }
+
+/** Pozivnica za novog korisnika. Vraća true ako je email poslan (false ako Resend nije podešen ili slanje nije uspjelo). */
+export async function sendInviteEmail(params: {
+  to: string;
+  name: string | null;
+  restaurantName: string;
+  invitedBy: string;
+  roleLabel: string;
+  link: string;
+}): Promise<boolean> {
+  const resend = client();
+  if (!resend) return false;
+  try {
+    const { error } = await resend.emails.send({
+      from: from(),
+      to: [params.to],
+      subject: `Pozivnica u MM Objave (${params.restaurantName})`,
+      html: layout(
+        `${params.name ? `${params.name}, d` : 'D'}obrodošli u MM Objave`,
+        `<p style="font-size:14px">${esc(params.invitedBy)} vas je dodao kao <b>${esc(params.roleLabel)}</b> za ${esc(params.restaurantName)}.</p>
+         <p style="font-size:14px">Kliknite ispod i postavite svoju lozinku. Link važi 7 dana i može se iskoristiti jednom.</p>`,
+        { href: params.link, label: 'Postavi lozinku' }
+      ),
+    });
+    if (error) throw new Error(error.message);
+    return true;
+  } catch (e: any) {
+    console.error('[Email] Slanje pozivnice nije uspjelo:', e.message);
+    return false;
+  }
+}
+
+/** Link za novu lozinku (zaboravljena lozinka). */
+export async function sendPasswordResetEmail(params: { to: string; link: string }): Promise<boolean> {
+  const resend = client();
+  if (!resend) return false;
+  try {
+    const { error } = await resend.emails.send({
+      from: from(),
+      to: [params.to],
+      subject: 'MM Objave: nova lozinka',
+      html: layout(
+        'Postavljanje nove lozinke',
+        `<p style="font-size:14px">Neko je zatražio novu lozinku za ovaj nalog. Ako to niste bili vi, zanemarite ovaj email.</p>
+         <p style="font-size:14px">Link važi 1 sat.</p>`,
+        { href: params.link, label: 'Postavi novu lozinku' }
+      ),
+    });
+    if (error) throw new Error(error.message);
+    return true;
+  } catch (e: any) {
+    console.error('[Email] Slanje linka za lozinku nije uspjelo:', e.message);
+    return false;
+  }
+}

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from './lib/prisma';
 import { authConfig } from './auth.config';
+import { isPendingHash } from './lib/passwordToken';
 
 // Hash za nepostojećeg korisnika, da odgovor traje isto kao za postojećeg
 const DUMMY_HASH = bcrypt.hashSync('nepostojeci-korisnik-dummy', 10);
@@ -27,9 +28,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!parsed.success) return null;
         const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
         // Uvijek se poredi hash (i za nepostojećeg korisnika), da vrijeme odgovora ne otkriva postoji li email.
-        const hash = user?.passwordHash ?? DUMMY_HASH;
+        // Pozvan korisnik koji još nije postavio lozinku ne može se prijaviti.
+        const hash = user && !isPendingHash(user.passwordHash) ? user.passwordHash : DUMMY_HASH;
         const ok = await bcrypt.compare(parsed.data.password, hash);
-        if (!user || !ok) return null;
+        if (!user || !ok || isPendingHash(user.passwordHash)) return null;
         return {
           id: user.id,
           email: user.email,
