@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "start": "prisma migrate deploy && next start -p ${PORT:-3000}",
+    "start": "prisma migrate deploy && npm run seed:auto && next start -p ${PORT:-3000}",
+    "seed:auto": "if [ -n \"$SEED_ADMIN_EMAIL\" ] && [ -n \"$SEED_ADMIN_PASSWORD\" ]; then tsx prisma/seed.ts; else echo 'seed preskočen (SEED_ADMIN_* nije postavljen)'; fi",
     "worker": "tsx worker.ts",
     "seed": "tsx prisma/seed.ts",
     "lint": "next lint",
