@@ -14,7 +14,13 @@ export async function GET() {
   url.searchParams.set('client_id', process.env.META_APP_ID);
   url.searchParams.set('redirect_uri', metaRedirectUri());
   url.searchParams.set('state', state);
-  url.searchParams.set('scope', META_SCOPES.join(','));
+  // Aplikacije s "Facebook Login for Business" traže config_id (dozvole su u konfiguraciji);
+  // bez njega se koristi klasični scope.
+  if (process.env.META_LOGIN_CONFIG_ID) {
+    url.searchParams.set('config_id', process.env.META_LOGIN_CONFIG_ID);
+  } else {
+    url.searchParams.set('scope', META_SCOPES.join(','));
+  }
   url.searchParams.set('response_type', 'code');
 
   const response = NextResponse.redirect(url.toString());
