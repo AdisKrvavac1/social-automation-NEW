@@ -38,8 +38,25 @@ export async function publishToPlatform(post: PostWithAccount): Promise<string> 
         `Meta je odbila token za "${post.socialAccount.accountName}". Ponovo poveži nalog.`
       );
     }
-    throw err;
+    throw describeApiError(err, post.platform);
   }
+}
+
+/** Axios greške pretvara u čitljivu poruku s razlogom koji je vratila Meta/TikTok (umjesto samo "status code 400"). */
+function describeApiError(err: any, platform: string): Error {
+  const data = err?.response?.data;
+  const metaErr = data?.error;
+  if (metaErr?.message) {
+    const parts = [metaErr.error_user_msg || metaErr.message];
+    const code = [metaErr.code, metaErr.error_subcode].filter(Boolean).join('/');
+    const e = new Error(`${platform}: ${parts.join(' ')}${code ? ` (kod ${code})` : ''}`);
+    (e as any).cause = err;
+    return e;
+  }
+  if (err?.response?.status) {
+    return new Error(`${platform}: HTTP ${err.response.status} ${JSON.stringify(data ?? '').slice(0, 300)}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 async function publishToFacebook(post: PostWithAccount, pageId: string, token: string): Promise<string> {

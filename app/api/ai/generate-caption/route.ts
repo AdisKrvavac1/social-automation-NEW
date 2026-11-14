@@ -61,6 +61,7 @@ Pravila:
     // Opcionalno: rezervni model(i), odvojeni zarezom, ako je glavni preopterećen.
     const fallbacks = (process.env.GEMINI_FALLBACK_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
     const response = await generateWithRetry(ai, [primary, ...fallbacks], prompt);
+    console.info(`[AI] OK (${user.id})`);
     const out = JSON.parse(response.text || '{}');
     const tags: string[] = (out.hashtags || [])
       .map((h: string) => (h.startsWith('#') ? h : `#${h}`).replace(/\s+/g, ''))

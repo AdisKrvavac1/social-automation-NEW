@@ -52,7 +52,7 @@ export default function NewPostForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, notes, withEnglish }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ error: `AI nije odgovorio (HTTP ${res.status}). Pokušaj ponovo.` }));
       if (!res.ok) throw new Error(data.error);
       setVariants(data.variants);
       setHashtags(data.hashtags);
