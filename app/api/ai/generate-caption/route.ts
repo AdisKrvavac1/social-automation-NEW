@@ -58,7 +58,7 @@ Pravila:
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
       contents: prompt,
       config: {
         temperature: 0.8,
@@ -81,6 +81,12 @@ Pravila:
     return NextResponse.json({ variants: [out.variantA, out.variantB].filter(Boolean), hashtags: tags });
   } catch (e: any) {
     console.error('[AI] Greška:', e?.message);
-    return NextResponse.json({ error: 'AI trenutno nije dostupan. Napiši tekst ručno ili pokušaj ponovo.' }, { status: 502 });
+    const msg = String(e?.message ?? '');
+    const hint = /NOT_FOUND|no longer available/i.test(msg)
+      ? ' (AI model nije dostupan, provjeri GEMINI_MODEL.)'
+      : /API key|PERMISSION_DENIED|UNAUTHENTICATED/i.test(msg)
+        ? ' (provjeri GEMINI_API_KEY.)'
+        : '';
+    return NextResponse.json({ error: `AI trenutno nije dostupan. Napiši tekst ručno ili pokušaj ponovo.${hint}` }, { status: 502 });
   }
 }
