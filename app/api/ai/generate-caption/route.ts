@@ -70,7 +70,7 @@ Pravila:
   } catch (e: any) {
     console.error('[AI] Greška:', e?.message);
     const msg = String(e?.message ?? '');
-    if (isTransient(msg)) {
+    if (isTransient(msg) || e?.name === 'AbortError' || e?.name === 'TimeoutError' || /timeout|aborted/i.test(msg)) {
       return NextResponse.json(
         { error: 'AI je trenutno preopterećen (Google). Pokušaj ponovo za minut ili napiši tekst ručno.' },
         { status: 503 }
@@ -101,25 +101,76 @@ const isTransient = (msg: string) =>
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Do 3 pokušaja po modelu (pauze ~1 s i ~2.5 s), pa sljedeći model. Ukupno ostaje ispod ~25 s. */
+const CALL_TIMEOUT_MS = 15_000; // jedan poziv Geminiju
+const TOTAL_BUDGET_MS = 40_000; // ukupno za sve pokušaje (preglednik prekida na 50 s)
+
+/** Pokušaj s vremenskim ograničenjem, da zahtjev nikad ne visi. */
+function callModel(ai: GoogleGenAI, model: string, prompt: string) {
+  return ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      temperature: 0.8,
+      responseMimeType: 'application/json',
+      responseSchema: SCHEMA,
+      httpOptions: { timeout: CALL_TIMEOUT_MS },
+      abortSignal: AbortSignal.timeout(CALL_TIMEOUT_MS + 1000),
+    },
+  });
+}
+
+/** Rezervni "flash" modeli dostupni ovom ključu (pronalaze se automatski, keširano 6 h). */
+let discovered: { at: number; models: string[] } | null = null;
+async function discoverFallbacks(ai: GoogleGenAI, primary: string): Promise<string[]> {
+  if (discovered && Date.now() - discovered.at < 6 * 3600_000) return discovered.models.filter((m) => m !== primary);
+  const names: string[] = [];
+  try {
+    const pager = await ai.models.list({ config: { pageSize: 100, abortSignal: AbortSignal.timeout(5000) } });
+    for await (const m of pager) {
+      const name = (m.name || '').replace(/^models\//, '');
+      const actions = m.supportedActions || [];
+      if (!/flash/i.test(name) || !actions.includes('generateContent')) continue;
+      if (/image|tts|audio|live|embedding|thinking|exp/i.test(name)) continue;
+      names.push(name);
+    }
+  } catch (e: any) {
+    console.warn('[AI] Lista modela nije dostupna:', String(e?.message ?? e).slice(0, 120));
+  }
+  // Prvo "lite" (manje opterećeni), pa ostali; najviše dva rezervna.
+  names.sort((a, b) => Number(/lite/i.test(b)) - Number(/lite/i.test(a)) || b.localeCompare(a));
+  discovered = { at: Date.now(), models: names };
+  return names.filter((m) => m !== primary).slice(0, 2);
+}
+
+/**
+ * Glavni model jednom; ako je preopterećen, rezervni modeli (iz GEMINI_FALLBACK_MODELS ili pronađeni
+ * automatski) pa još jednom glavni. Sve unutar ukupnog budžeta od 40 s.
+ */
 async function generateWithRetry(ai: GoogleGenAI, models: string[], prompt: string) {
+  const started = Date.now();
+  const [primary, ...configured] = models;
   let lastError: unknown;
-  for (const model of models) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        return await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: { temperature: 0.8, responseMimeType: 'application/json', responseSchema: SCHEMA },
-        });
-      } catch (e: any) {
-        lastError = e;
-        const msg = String(e?.message ?? '');
-        if (!isTransient(msg)) throw e;
-        console.warn(`[AI] ${model} pokušaj ${attempt + 1} nije uspio (privremeno): ${msg.slice(0, 120)}`);
-        if (attempt < 2) await sleep(1000 * (attempt === 0 ? 1 : 2.5) + Math.random() * 400);
+  const queue: string[] = [primary];
+  let fallbacksAdded = false;
+
+  for (let i = 0; i < queue.length; i++) {
+    if (Date.now() - started > TOTAL_BUDGET_MS - CALL_TIMEOUT_MS) break;
+    const model = queue[i];
+    try {
+      return await callModel(ai, model, prompt);
+    } catch (e: any) {
+      lastError = e;
+      const msg = String(e?.message ?? '');
+      const transient = isTransient(msg) || e?.name === 'AbortError' || e?.name === 'TimeoutError';
+      if (!transient) throw e;
+      console.warn(`[AI] ${model} nije odgovorio (privremeno): ${msg.slice(0, 120) || e?.name}`);
+      if (!fallbacksAdded) {
+        fallbacksAdded = true;
+        const extra = configured.length ? configured : await discoverFallbacks(ai, primary);
+        queue.push(...extra, primary);
+        await sleep(600);
       }
     }
   }
-  throw lastError;
+  throw lastError ?? new Error('AI timeout (UNAVAILABLE)');
 }

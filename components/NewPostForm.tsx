@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import MediaUploader from './MediaUploader';
 import { POST_TYPES, type PostTypeId } from '@/lib/postTypes';
@@ -37,30 +37,47 @@ export default function NewPostForm({
   const [hashtags, setHashtags] = useState<string[]>([]);
   const [content, setContent] = useState('');
   const [withEnglish, setWithEnglish] = useState(false);
-  const [busy, setBusy] = useState<'ai' | 'send' | null>(null);
+  const [busy, setBusy] = useState<'send' | null>(null);
+  // AI radi odvojeno: dok piše, objava se i dalje može poslati ručno napisanim tekstom.
+  const [aiBusy, setAiBusy] = useState(false);
+  const aiAbort = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
   const hint = POST_TYPES.find((t) => t.id === type)?.hint;
 
   async function generate() {
-    setBusy('ai');
+    setAiBusy(true);
     setError(null);
+    const controller = new AbortController();
+    aiAbort.current = controller;
+    const timer = setTimeout(() => controller.abort(), 50_000);
+    const contentAtStart = content;
     try {
       const res = await fetch('/api/ai/generate-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, notes, withEnglish }),
+        signal: controller.signal,
       });
       const data = await res.json().catch(() => ({ error: `AI nije odgovorio (HTTP ${res.status}). Pokušaj ponovo.` }));
       if (!res.ok) throw new Error(data.error);
       setVariants(data.variants);
       setHashtags(data.hashtags);
-      setContent(`${data.variants[0]}\n\n${data.hashtags.join(' ')}`);
+      // Ne pregazi tekst koji je korisnik u međuvremenu sam napisao.
+      setContent((current) =>
+        current === contentAtStart || !current.trim() ? `${data.variants[0]}\n\n${data.hashtags.join(' ')}` : current
+      );
     } catch (e: any) {
-      setError(e.message);
+      setError(
+        e?.name === 'AbortError'
+          ? 'AI je predugo odgovarao pa je prekinut. Napiši tekst ručno ili pokušaj ponovo.'
+          : e.message
+      );
     } finally {
-      setBusy(null);
+      clearTimeout(timer);
+      aiAbort.current = null;
+      setAiBusy(false);
     }
   }
 
@@ -129,9 +146,15 @@ export default function NewPostForm({
         <label htmlFor="notes" className="label">3. Jela ili napomena</label>
         <textarea id="notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={hint} className="field" />
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className="btn" onClick={generate} disabled={busy !== null || notes.trim().length < 2}>
-            {busy === 'ai' ? 'Pišem tekst…' : variants.length ? 'Napiši ponovo' : 'Napiši tekst (AI)'}
-          </button>
+          {aiBusy ? (
+            <button type="button" className="btn" onClick={() => aiAbort.current?.abort()}>
+              Pišem tekst… (prekini)
+            </button>
+          ) : (
+            <button type="button" className="btn" onClick={generate} disabled={busy !== null || notes.trim().length < 2}>
+              {variants.length ? 'Napiši ponovo' : 'Napiši tekst (AI)'}
+            </button>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={withEnglish} onChange={(e) => setWithEnglish(e.target.checked)} /> i na engleskom
           </label>
