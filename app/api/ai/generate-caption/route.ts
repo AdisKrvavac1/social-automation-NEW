@@ -57,23 +57,10 @@ Pravila:
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        temperature: 0.8,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            variantA: { type: Type.STRING },
-            variantB: { type: Type.STRING },
-            hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
-          },
-          required: ['variantA', 'variantB', 'hashtags'],
-        },
-      },
-    });
+    const primary = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    // Opcionalno: rezervni model(i), odvojeni zarezom, ako je glavni preopterećen.
+    const fallbacks = (process.env.GEMINI_FALLBACK_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
+    const response = await generateWithRetry(ai, [primary, ...fallbacks], prompt);
     const out = JSON.parse(response.text || '{}');
     const tags: string[] = (out.hashtags || [])
       .map((h: string) => (h.startsWith('#') ? h : `#${h}`).replace(/\s+/g, ''))
@@ -82,6 +69,12 @@ Pravila:
   } catch (e: any) {
     console.error('[AI] Greška:', e?.message);
     const msg = String(e?.message ?? '');
+    if (isTransient(msg)) {
+      return NextResponse.json(
+        { error: 'AI je trenutno preopterećen (Google). Pokušaj ponovo za minut ili napiši tekst ručno.' },
+        { status: 503 }
+      );
+    }
     const hint = /NOT_FOUND|no longer available/i.test(msg)
       ? ' (AI model nije dostupan, provjeri GEMINI_MODEL.)'
       : /API key|PERMISSION_DENIED|UNAUTHENTICATED/i.test(msg)
@@ -89,4 +82,43 @@ Pravila:
         : '';
     return NextResponse.json({ error: `AI trenutno nije dostupan. Napiši tekst ručno ili pokušaj ponovo.${hint}` }, { status: 502 });
   }
+}
+
+const SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    variantA: { type: Type.STRING },
+    variantB: { type: Type.STRING },
+    hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
+  },
+  required: ['variantA', 'variantB', 'hashtags'],
+};
+
+/** Privremene greške (preopterećenje, limit, mrežni prekid) vrijedi ponoviti. */
+const isTransient = (msg: string) =>
+  /\b(429|500|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand|DEADLINE_EXCEEDED|ECONNRESET|fetch failed/i.test(msg);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Do 3 pokušaja po modelu (pauze ~1 s i ~2.5 s), pa sljedeći model. Ukupno ostaje ispod ~25 s. */
+async function generateWithRetry(ai: GoogleGenAI, models: string[], prompt: string) {
+  let lastError: unknown;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { temperature: 0.8, responseMimeType: 'application/json', responseSchema: SCHEMA },
+        });
+      } catch (e: any) {
+        lastError = e;
+        const msg = String(e?.message ?? '');
+        if (!isTransient(msg)) throw e;
+        console.warn(`[AI] ${model} pokušaj ${attempt + 1} nije uspio (privremeno): ${msg.slice(0, 120)}`);
+        if (attempt < 2) await sleep(1000 * (attempt === 0 ? 1 : 2.5) + Math.random() * 400);
+      }
+    }
+  }
+  throw lastError;
 }
